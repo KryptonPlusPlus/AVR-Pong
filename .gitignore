@@ -1,0 +1,4 @@
+# --- Kicad .gitignore ---
+*-backups
+*.kicad_prl
+# ---
