@@ -1,0 +1,150 @@
+\documentclass[twocolumn]{article}
+
+\usepackage[a4paper, top    = 2.5cm, 
+                     bottom = 2.0cm, 
+                     left   = 2.5cm, 
+                     right  = 2.0cm]{geometry}
+
+\usepackage[brazil]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{microtype}
+
+\usepackage{indentfirst}
+
+\usepackage{float}
+
+\usepackage{tikz}
+\tikzset{>=latex} % for LaTeX arrow head
+
+\title{AVR Pong}
+\author{KrpytonPlusPlus}
+
+\begin{document}
+
+\maketitle
+
+\section{Introdução}
+    Esse projeto visa projetar um clone do jogo \textsl{Pong} em um microcontrolador \textsl{avr} utilizando o padrão de comunicação \textsl{vga} para exibir a imagem em um monitor.
+
+    Para isso foi dimensionado os ciclos de \textsl{cpu} para comportar o envio das informações de varredura dos \textsl{pixels} e os ciclos sobressalentes foram utilizados para carregar os dados para os \textsl{buffers} com as cores de cada pixel em uma linha (preto ou branco) e fazer o tratamento das iterações do jogo.
+
+    Buscando facilitar os cálculos e aumentar a compatibilidade com os monitores foi utilizado um sistema de \textsl{clock} de \(25{,}175MHz\) para o microcontrolador superior ao limite estipulado pelo fabricante no manual, porém como vai ser visto adiante é a mesma frequência de sinal utilizada pelo monitor para gerar a imagem.
+
+\section{VGA (Video Graphics Array)}
+    \subsection{Regiões de varredura}
+    
+    \input{figures/tikz/screen_vga}
+
+    No monitor normalmente a \textsl{Back Porch} vem antes da \textsl{Visible Area}, porém para facilitar a apresentação e por ser um sinal cíclico foi apresentada no final.
+
+    Para facilitar a visualização as dimensões de cada região não estão proporcionais aos valores reais.
+    
+    \begin{table}[H]
+        \centering
+        \begin{tabular}{r c c}                                            \cline{2-3}
+                                  & \multicolumn{2}{c}{\textsl{Pixels}} \\\cline{2-3}
+                                  & Horizontal      & Vertical          \\\hline
+            \textsl{Back Porch}   & 48              & 33                \\
+            \textsl{Visible Area} & 640             & 480               \\
+            \textsl{Front Porch}  & 16              & 10                \\
+            \textsl{Sync Pulse}   & 96              & 2                 \\
+            Total                 & 800             & 525               \\\hline
+        \end{tabular}
+        \caption{Dimensão horizontal e vertical em \textsl{pixels} da tela para cada região de varredura}
+        \label{tab:dimensions_scanning_regions}
+    \end{table}
+
+    Normalmente os dados apresentados na tabela \ref{tab:dimensions_scanning_regions} são dados em micro segundos e quantidade de linhas, para a dimensão horizontal e vertical, respectivamente.
+    
+    \subsection{Pulsos de sincronismo}
+        Os pulsos verticais são formados utilizando o \textsl{Timer 1} no modo \textsl{fast pwm} com \textsl{top} sendo o \textsl{icr1} (\textsl{wgm1[3:0] = 14\(_{10}\)}) e utilizando um \textsl{prescaling} com valor 8 (\textsl{cs1[2:0] = 2\(_{10}\)}), a escolha desse \textsl{Timer} foi feita pelo fato de possuir um contador de 16 \textsl{bits}. O \textsl{timer} possui 3 registradores de comparação (\textsl{ocr1a}, \textsl{ocr1b} e \textsl{icr1}), sendo dois de saída, para poder realizar a construção do pulso, utilizando o modo de comparação para quando o contador atingir o valor de \textsl{ocr1a} a saída ir para nível lógico baixo e quando voltar para \textsl{bottom} ir para nível lógico alto (\textsl{com1a[1:0] = 2\(_{10}\)}) e o terceiro, de entrada, para determinar o inicio da área visível da tela.
+
+        \input{figures/tikz/timer_1}
+
+        Na figura é possível ver o funcionamento esperado da saída \textsl{oc1a} em função do contador \textsl{tcnt1}, as regiões 1, 2 e 3 são respectivamente, \textsl{Vertical Back Porch}, \textsl{Vertical Visible Area} junto com a \textsl{Vertical Front Porch} e \textsl{Vertical Sync Pulse}. % TODO: deixar em portugues
+
+        Os valores de comparação da contagem são dados a seguir:
+        
+        \begin{table}[H]
+            \centering
+            \begin{tabular}{l l}           \hline
+                \textsl{icr1}   & 52499 \\ \hline
+                \textsl{ocr1a}  & 52299 \\ \hline
+                \textsl{ocr1b}  & 3199  \\ \hline
+            \end{tabular}
+            \caption{Valores dos registradores de comparação do \textsl{Timer 1}}
+            \label{tab:val_timer_1_Hsync}
+        \end{table}
+
+        O valor do \textsl{ocr1b} foi calculado para uma linha a menos, para evitar conflitos com os pulsos horizontais, pois quando o seu valor é atingido ocorre uma interrupção para um função que ativa a interrupção para o \textsl{Timer 0} em \textsl{ocr0a}, que será desativada dentro do próprio algoritmo da função chamada pela comparação.
+
+        Em que \textsl{icr1}, por exemplo, é calculado da seguinte forma:
+        
+        \begin{equation}
+            \frac{800 \cdot 525}{8} - 1 = 52499
+        \end{equation}
+        
+        Pelo fato do \textsl{clock} utilizado ser de \(25{,}175 MHz\), igual a frequência dos \textsl{pixels} para o padrão de resolução utilizado, os valores de comparação são numericamente iguais menos um a contagem dos \textsl{pixels}, pelo fato da contagem iniciar em zero, considerando o valor do \textsl{prescaling}.
+        
+        Os pulsos horizontais são formados pelo \textsl{Timer 0}, deixando o \textsl{Timer 2} livre, no modo \textsl{fast pwm} com \textsl{top} sendo o \textsl{ocr0a} (\textsl{wgm0[2:0] = 7\(_{10}\)}) e utilizando \textsl{prescaling} com valor 8 (\textsl{cs0[2:0] = 2\(_{10}\)}). Esse \textsl{Timer} possui dois registradores de comparação (\textsl{ocr0a}, \textsl{ocr0b}) utilizados para criar um pulso de polaridade negativa entre eles.
+
+        Durante o \textsl{overflow} do contador ocorre uma chamada de interrupção que faz o tratamento da região horizontal \textsl{Back Porch} e da área visível, realizando o envio dos \textsl{pixels} e durante a região \textsl{Front Porch} e \textsl{Sync Pulse} ocorre a construção do \textsl{buffer} da próxima linha.
+        
+        \input{figures/tikz/timer_0}
+
+        Na figura é possível ver o funcionamento esperado da saída \textsl{oc0b} em função do contador \textsl{tcnt0}, as regiões 1 e 2 são respectivamente, horizontal \textsl{Back Porch} junto com a \textsl{Visible Area} e a \textsl{Front Porch}, e a \textsl{Sync Pulse}.
+
+        Os valores de comparação da contagem são dados a seguir:
+        
+        \begin{table}[H]
+            \centering
+            \begin{tabular}{l l}        \hline
+                \textsl{ocr0a}  & 99 \\ \hline
+                \textsl{ocr0b}  & 87 \\ \hline
+            \end{tabular}
+            \caption{Valores dos registradores de comparação do \textsl{Timer 0}}
+            \label{tab:val_timer_0}
+        \end{table}
+
+        Em que o calculo é similar ao realizado para o comparadores do pulso vertical, como é possível ver a seguir para o \textsl{ocr0a}, por exemplo:
+    
+        \begin{equation}
+             \frac{800}{8} - 1 = 99
+        \end{equation}
+
+    \subsection{Varredura dos \textsl{pixels}}
+        Para realizar a varredura dos \textsl{pixels} foi utilizado o protocolo de comunicação \textsl{usart} no modo master \textsl{spi} do microcontrolador, pelo fato de ser possível fazer uma comunicação de no máximo duas vezes mais lenta que o \textsl{clock} do sistema de forma autônoma, e por ter a mesma frequência dos \textsl{pixels} implica que a resolução horizontal é reduzida pela metade, porém ocupando a mesma quantidade de \textsl{pixels}.
+        
+        A comunicação é feita pela conexão \verb|txd| e o \verb|hardware| utiliza a conexão \textsl{xck} como \textsl{clock} de sincronismo, mesmo que ele não seja utilizado.
+        
+\section{\textsl{Pong}}
+
+    O jogo \textsl{Pong} se baseia em lançar uma bola de um lado ao outro da tela com uma "raquete" (\textsl{paddle}) tentando fazer com que o outro jogador erre a bola assim ganhando um ponto, parecido com o \textsl{ping pong}, porém esse projeto se baseia em apenas um jogador, portanto o outro \textsl{paddle} apenas segue a bola, e os elementos do jogo possuem algumas iterações com entre si, por exemplo sempre que a bola atinge o \textsl{paddle} da esquerda ela aumenta a velocidade além de possuir trajetórias diferentes dependendo de onde acertar.
+
+    A disposição dos elementos do jogo é apresentada na figura \ref{fig:game_screen}, onde é possível observar os dois \textsl{paddles}, a bola, a linha divisória central e a pontuação de cada jogador.
+    
+    \input{figures/tikz/screen_pong}
+
+    As dimensões de cada elemento da janela segue os valores apresentados na tabela \ref{tab:dimension_screen_game}, para o tracejado central esse é o valor de cada traço:
+    
+    \begin{table}[H]
+        \centering
+        \begin{tabular}{l c c}                                   \\ \cline{2-3}
+                              & H (\textsl{Pixels}) & V (Linhas) \\ \hline
+            Janela            & 640                 & 480        \\ 
+            \textsl{Paddle}   & 8                   & 63         \\ 
+            Bola              & 8                   & 8          \\
+            Tracejado central & 4                   & 6          \\ \hline
+        \end{tabular}
+        \caption{Dimensão de cada objeto, em que H é o tamanho horizontal e V é o tamanho vertical.}
+        \label{tab:dimension_screen_game}
+    \end{table}
+
+    Como já apresentado, a bola possui trajetórias diferentes dependendo de onde ela atinge o \textsl{paddle}, quanto mais afastado do centro maior será o ângulo entre a normal e a trajetória refletida, na mesma direção de crescimento do \textsl{paddle}, em que no centro esse valor é igual a zero, como é possível ver na figura \ref{fig:collisions_paddle}:
+    
+    \input{figures/tikz/paddle_collision}
+
+    \bibliographystyle{unsrt}
+    \bibliography{ref}
+
+\end{document}

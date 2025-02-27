@@ -2,3 +2,10 @@
 *-backups
 *.kicad_prl
 # ---
+
+# --- Latex .gitignore ---
+*.aux
+*.bbl
+*.blg
+*.log
+#---

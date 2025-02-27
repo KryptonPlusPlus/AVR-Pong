@@ -7,6 +7,8 @@
 
 Jogo Pong de um jogador em um microcontrolador avr (atmega328pa) exibindo a imagem em um monitor vga de resolução 640x480 60Hz de tela visível.
 
+Veja uma documentação não finalizada [aqui](documentation/doc/main.pdf).
+
 > [!WARNING]
 > Para aumentar a compatibilidade com os monitores foi utilizado um sistema de clock de 25.175MHz, superior ao limite recomendado pelo fabricante de 20MHz.
 
